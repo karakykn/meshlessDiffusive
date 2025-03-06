@@ -1,0 +1,17 @@
+CFL:
+.5
+
+RBF type: (0 TPS, 1 MQ)
+0
+
+Time integrator: (0 forward euler)
+0
+
+simulation end time (seconds):
+3200
+
+diffusivity limit:
+400
+
+print step:
+100
