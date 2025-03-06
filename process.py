@@ -1,7 +1,5 @@
 from source import *
 
-caseName = 'syntheticChannel'
+caseName = 'syntheticNetwork'
 solver = Network(caseName)
 solver.solve()
-
-print('')

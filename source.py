@@ -1,6 +1,7 @@
 import numpy as np
 import os
 from collections import deque, defaultdict
+import matplotlib.pyplot as plt
 
 class Network(object):
     def __init__(self, caseName, g=9.81):
@@ -31,6 +32,8 @@ class Network(object):
             self.segDownstreamInfo = []
         else:
             self.queSegments()
+
+        self.reset_junctions()
 
     def load_segments(self):
         """Initialize and store SingleChannel objects for each segment."""
@@ -74,10 +77,9 @@ class Network(object):
         self.calcOrder = np.array(self.calcOrder)
 
     def solve(self):
-
+        iter = 0
         if self.time_integrator == 0:
             while self.time < self.simEndTime:
-
                 dt = 1e8
                 for i in range(self.num_segments):
                     self.segments[i].update_params(self.diffLim)
@@ -87,76 +89,86 @@ class Network(object):
                     dt = min(dt, np.min(dt_arr))
                 dt = self.CFL * dt
                 self.time += dt
-                print(self.time)
+                iter += 1
 
                 for i in self.calcOrder:
-                    self.segments[i].read_upstream_Q(self.time)
+                    self.segments[i].Q[0] = self.segments[i].read_upstream_Q(self.time)
                     self.segments[i].solveSeg_fwEuler(dt)
-                    for j in self.segDownstreamInfo:
+                    for j in self.segDownstreamInfo[i]:
                         self.update_junction_Q(self.segments[i].Q[-1], j)
                 for i in self.calcOrder[::-1]:
+                    self.segments[i].h[-1] = self.segments[i].read_downstream_h(self.time)
                     self.segments[i].solveSeg_h()
-                    for j in self.segUpstreamInfo:
+                    for j in self.segUpstreamInfo[i]:
                         self.update_junction_h(self.segments[i].h[0], j)
 
+                if iter % self.printStep == 0:
+                    for i in self.calcOrder:
+                        print(f"Time: {self.time}")
+                        time_folder = f"{self.caseName}/segment{i}/run/{self.time:.4f}"
+                        os.makedirs(time_folder, exist_ok=True)
+                        np.savetxt(f"{time_folder}/h.csv", self.segments[i].h[:])
+                        np.savetxt(f"{time_folder}/Q.csv", self.segments[i].Q[:])
+            time_folder = f"{self.caseName}/segment{i}/run/{self.time:.4f}"
+            os.makedirs(time_folder, exist_ok=True)
+            np.savetxt(f"{time_folder}/h.csv", self.segments[i].h[:])
+            np.savetxt(f"{time_folder}/Q.csv", self.segments[i].Q[:])
+
     def update_junction_Q(self, Q, segId):
-        """Update the boundary condition Q for downstream segments."""
-
         file_path = f"{self.caseName}/segment{segId}/geo/boundary_Q"
+        update_tuple = (self.time, Q)
 
-        # Ensure the directory exists
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        try:
+            # Try reading the file
+            with open(file_path, "r") as file:
+                lines = file.readlines()
+        except FileNotFoundError:
+            # If the file doesn't exist, initialize lines as empty
+            lines = []
 
-        # Create a new entry
-        new_entry = np.array([[self.time, Q]])
+        updated_lines = []
+        entry_written = False
 
-        # Check if the file exists and has data
-        if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-            # Load existing data
-            existing_data = np.loadtxt(file_path)
+        for line in lines:
+            parts = line.split()
+            if float(parts[0]) == update_tuple[0]:  # If time matches, update Q
+                parts[1] = str(float(parts[1]) + update_tuple[1])
+                entry_written = True
+            updated_lines.append(" ".join(parts))
 
-            # Ensure it's a 2D array even if there's only one row
-            if existing_data.ndim == 1:
-                existing_data = existing_data.reshape(1, -1)
+        # If no existing entry was updated, append the new tuple
+        if not entry_written:
+            updated_lines.append(f"{update_tuple[0]} {update_tuple[1]}")
 
-            # Append new entry
-            updated_data = np.vstack((existing_data, new_entry))
-        else:
-            # If file doesn't exist or is empty, start fresh
-            updated_data = new_entry
-
-        # Save back to file
-        np.savetxt(file_path, updated_data, fmt="%.6f")
+        # Write back the updated content
+        with open(file_path, "w") as file:
+            file.write("\n".join(updated_lines) + "\n")
 
     def update_junction_h(self, h, segId):
-        """Update the boundary condition Q for downstream segments."""
 
-        # Define the file path
         file_path = f"{self.caseName}/segment{segId}/geo/boundary_h"
+        tuple = (self.time, h)
 
-        # Ensure the directory exists
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, "a") as file:
+            file.write(f"{tuple[0]} {tuple[1]}\n")
 
-        # Create a new entry
-        new_entry = np.array([[self.time, h]])
+    def reset_junctions(self):
+        for i in self.calcOrder:
+            for j in self.segDownstreamInfo[i]:
+                fpath = f"{self.caseName}/segment{j}/geo/boundary_Q"
+                with open(fpath, "w") as file:
+                    pass
+                file.close()
+            for j in self.segUpstreamInfo[i]:
+                fpath = f"{self.caseName}/segment{j}/geo/boundary_h"
+                with open(fpath, "w") as file:
+                    pass
+                file.close()
+                self.update_junction_h(self.segments[i].h[-1], j)
+        for i in self.calcOrder:
+            for j in self.segDownstreamInfo[i]:
+                self.update_junction_Q(self.segments[i].Q[-1], j)
 
-        # Check if the file exists and has data
-        if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-            # Load existing data
-            existing_data = np.loadtxt(file_path)
-
-            # Ensure it's a 2D array even if there's only one row
-            if existing_data.ndim == 1:
-                existing_data = existing_data.reshape(1, -1)
-
-            # Append new entry
-            updated_data = np.vstack((existing_data, new_entry))
-        else:
-            # If file doesn't exist or is empty, start fresh
-            updated_data = new_entry
-
-        # Save back to file
-        np.savetxt(file_path, updated_data, fmt="%.6f")
 
 class SingleChannel(object):
     """Radial Basis Function Collocation Method for 1D diffusive wave equation."""
@@ -219,21 +231,23 @@ class SingleChannel(object):
         rmin = np.min(r[0,1:])
         if shapeParameter == 0:
             c = 4 * rmin
+        self.f = np.sqrt(r ** 2 + c ** 2)
+        self.fx[:,:] = xdif[:,:] / self.f[:,:]
+        self.fxx[:,:] = 1 / self.f[:,:] - xdif[:,:] ** 2 / self.f[:,:] ** 3
 
         self.hsys = self.fx
         self.hsys[-1,:] = self.f[-1,:]
         inv_hsys = np.linalg.pinv(self.hsys)
         self.hsys = np.matmul(self.f, inv_hsys)
 
-        self.Qsys = self.f
-        self.Qsys[-1, :] = self.fx[-1, :]
-        inv_Qsys = np.linalg.pinv(self.Qsys)
-        self.Qsys = np.matmul(inv_Qsys, self.f)
-        invF = np.linalg.pinv(self.f)
-        self.fx_invF = np.matmul(self.fx, invF)
-        self.fxx_invF = np.matmul(self.fxx, invF)
+        Qsys = self.f
+        Qsys[-1, :] = self.fx[-1, :]
+        self.inv_Qsys = np.linalg.pinv(Qsys)
+        self.invF = np.linalg.pinv(self.f)
+        self.fx_invF = np.matmul(self.fx, self.invF)
+        self.fxx_invF = np.matmul(self.fxx, self.invF)
 
-    def buildTPS(self, beta=2):
+    def buildTPS(self, beta=4):
         for i in range(self.nodeNo):
             for j in range(self.nodeNo):
                 if i != j:
@@ -250,13 +264,12 @@ class SingleChannel(object):
         inv_hsys = np.linalg.pinv(self.hsys)
         self.hsys = np.matmul(self.f, inv_hsys)
 
-        self.Qsys = self.f
-        self.Qsys[-1, :] = self.fx[-1, :]
-        inv_Qsys = np.linalg.pinv(self.Qsys)
-        self.Qsys = np.matmul(inv_Qsys, self.f)
-        invF = np.linalg.pinv(self.f)
-        self.fx_invF = np.matmul(self.fx, invF)
-        self.fxx_invF = np.matmul(self.fxx, invF)
+        Qsys = self.f
+        Qsys[-1, :] = self.fx[-1, :]
+        self.inv_Qsys = np.linalg.pinv(Qsys)
+        self.invF = np.linalg.pinv(self.f)
+        self.fx_invF = np.matmul(self.fx, self.invF)
+        self.fxx_invF = np.matmul(self.fxx, self.invF)
 
 
     def update_bc(self, time):
@@ -281,8 +294,12 @@ class SingleChannel(object):
         diff = np.matmul(self.I * self.diffu, np.matmul(self.fxx_invF, self.Q))
         lat = self.cele * self.lat
         '''Euler here'''
-        self.Q[1:-1] +=  dt * (-adv[1:-1] + diff[1:-1] - lat[1:-1])
-        self.Q[-1] += self.f[-1:,:]
+        self.Q[1:] +=  dt * (-adv[1:] + diff[1:] - lat[1:])
+        # rhs = self.Q
+        # rhs[-1] = 0
+        # rhs = np.matmul(self.inv_Qsys, rhs)
+        # self.Q[-1] = np.matmul(self.f[-1,:], rhs)
+        self.Q[-1] = self.Q[-2]
 
     def solveSeg_h(self):
         '''Calculate new h'''
@@ -320,6 +337,7 @@ class SingleChannel(object):
 
     def read_upstream_Q(self, time):
         Q_boundaries = np.loadtxt(self.geom_path + 'boundary_Q')
+        Q_boundaries = np.atleast_2d(Q_boundaries)
         times = Q_boundaries[:, 0]  # Extract time column
         Q_values = Q_boundaries[:, 1]  # Extract Q column
 
@@ -330,8 +348,9 @@ class SingleChannel(object):
 
     def read_downstream_h(self, time):
         h_boundaries = np.loadtxt(self.geom_path + 'boundary_h')
-        times = h_boundaries[:, 0]  # Extract time column
-        h_values = h_boundaries[:, 1]  # Extract Q column
+        h_boundaries = np.atleast_2d(h_boundaries)
+        times = h_boundaries[:, 0]
+        h_values = h_boundaries[:, 1]
 
         # Interpolate Q for the given time
         h_interp = np.interp(time, times, h_values)

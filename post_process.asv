@@ -1,0 +1,10 @@
+clc;
+clear all;
+
+caseName = 'syntheticChannel';
+segdirs = dir(caseName);
+segdirs = {segdirs.name};
+segdirs = segdirs(~ismember(segdirs, {'.', '..', '.DS_Store', 'input', 'network'}));
+
+for i=1:length(segdirs)
+    time_dir = fullfile(run_path, segdir{i});
