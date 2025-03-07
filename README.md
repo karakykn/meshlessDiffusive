@@ -15,8 +15,8 @@ and a 'run' file to feed the model with initial conditions and keep the record
 of model results with specified print step.
 ----geo---
 nodes: the position of nodes in the river segment.
-slopes: slopes for each nodes.
-mannings_n: mannings value for each node.
+slopes: slopes.
+mannings_n: mannings.
 xsInfo: cross section information for each node, this array directs correct cs for that node.
 xs0 (or xs1, xs2): cross section data (y, x1, x2)
 boundary_h: downstream water levels for the segment. If the segment has any downstream segment,
